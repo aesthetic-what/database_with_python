@@ -1,4 +1,5 @@
 import sys
+import bcrypt
 from PyQt5 import uic
 from PyQt5.QtSql import QSqlDatabase, QSqlTableModel, QSqlQuery
 from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
@@ -18,31 +19,45 @@ class Login_window(QMainWindow):
 
     def login(self):
 
-        self.login = self.lineEdit.text()
-        self.password = self.lineEdit_2.text()
+        login = self.lineEdit.text()
+        password = self.lineEdit_2.text()
+
+        role_client = 'Клиент'
+        role_admin = 'Админ'
 
         self.db = QSqlDatabase.addDatabase('QSQLITE')
         self.db.setDatabaseName('form.db')
         self.db.open()
 
-        if not self.login or not self.password:
+        if not login or not password:
             QMessageBox.warning(self, 'заполните все поля', 'не все поля заполнены, заполните их для регистрации')
             return
         
         query = QSqlQuery()
-        query.prepare("SELECT pass FROM users WHERE login = ?;")
-        query.addBindValue(self.login)
+        query.prepare("SELECT hash_pass, Role FROM users WHERE login = ?;")
+        query.addBindValue(login)
         query.exec_()
         
         if query.next():
-            self.db_pass = query.value(0)
-            if self.db_pass == self.password:
-                QMessageBox.information(self, 'Успех!', 'Вы успешно авторизировались')
-                Login_window.close(self)
-                self.DB_win = Object_data()
-                self.DB_win.show()
-                return
+            self.db_pass = query.value(0).encode('utf-8')
+            self.db_role = query.value(1)
+            if bcrypt.checkpw(password.encode('utf-8'), self.db_pass):
+                if self.db_role == role_admin:
+
+                    print(f'хеш: {self.db_pass}'
+                        f'пароль: {password}')
+                    
+                    QMessageBox.information(self, 'Успех!', 'Вы успешно авторизировались')
+                    Login_window.close(self)
+                    self.DB_win = Admin_window()
+                    self.DB_win.show()
+                    return
+                else:
+                    Login_window.close(self)
+                    self.DB_win = Object_data()
+                    self.DB_win.show()
             else:
+                print(self.db_pass)
                 QMessageBox.warning(self, 'Ошибка!', 'Неправильно введен пароль')
         else:
             QMessageBox.warning(self, 'Ошибка!', 'Пользователь с таким логином не найден')
@@ -68,25 +83,29 @@ class Register_window(QMainWindow):
     def register(self):
 
         # строки состояния
-        self.login = self.first_line.text()
-        self.password = self.sec_line.text()
-        self.conf_password = self.sec_line_confirm.text()
+        login = self.first_line.text()
+        password = self.sec_line.text()
+        conf_password = self.sec_line_confirm.text()
+
+        role = 'Клиент'
+
+        hashed_password = bcrypt.hashpw(conf_password.encode('utf-8'), bcrypt.gensalt())  # Хэширование с добавлением соли
 
 
         self.db = QSqlDatabase.addDatabase('QSQLITE')
         self.db.setDatabaseName('form.db')
         self.db.open()
 
-        if not self.login or not self.password or not self.conf_password:
+        if not login or not password or not conf_password:
             QMessageBox.warning(self, 'заполните все поля', 'не все поля заполнены, заполните их для регистрации')
             return
-        elif not self.password == self.conf_password:
+        elif not password == conf_password:
             QMessageBox.warning(self, 'пароли не совпадают', 'пароли не совпадают, проверьте написание пароля')
             return
         
         query = QSqlQuery()
         query.prepare("SELECT COUNT(*) FROM users WHERE login = ?;")
-        query.addBindValue(self.login)
+        query.addBindValue(login)
         query.exec_()
 
         if query.next() and query.value(0) > 0:
@@ -94,9 +113,11 @@ class Register_window(QMainWindow):
             return
         
         # Вставка нового пользователя в таблицу
-        query.prepare("INSERT INTO users (login, pass) VALUES (?, ?);")
-        query.addBindValue(self.login)
-        query.addBindValue(self.password) # В реальной системе нужно использовать хэширование пароля!
+        query.prepare("INSERT INTO users (login, pass, hash_pass, Role) VALUES (?, ?, ?, ?);")
+        query.addBindValue(login)
+        query.addBindValue(password) # В реальной системе нужно использовать хэширование пароля!
+        query.addBindValue(hashed_password.decode('utf-8'))
+        query.addBindValue(role)
 
         if query.exec_():
             QMessageBox.information(self, "Успех", "Регистрация прошла успешно!")
@@ -217,13 +238,21 @@ class Object_data(QMainWindow):
 
     def reg_data(self):
         self.reg_window = Register_window()
-        self.reg_widow.show()
+        self.reg_window.show()
 
     def login_data(self):
         self.log_window = Login_window()
         self.log_window.show()
         
         
+class Admin_window(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        uic.loadUi(r"design\admin.ui", self)
+        self.setWindowTitle("Admin_menu")
+
+
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     win = Login_window()
