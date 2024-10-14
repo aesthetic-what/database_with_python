@@ -2,13 +2,73 @@ import sys
 import bcrypt
 from PyQt5 import uic
 from PyQt5.QtSql import QSqlDatabase, QSqlTableModel, QSqlQuery
-from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
+from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox, QWidget
+
+
+class Add_user(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        uic.loadUi(r"add_user.ui", self)
+        self.setWindowTitle("DataBase")
+
+        # привязываем кнопку
+        self.add_button.clicked.connect(self.add_user_button)
+
+    def select_role(self):
+            if self.admin.isChecked():
+                return self.admin.text()
+            if self.client.isChecked():
+                return self.client.text()
+
+    def add_user_button(self):
+        # строки состояния
+        login = self.login.text()
+        password = self.password.text()
+        role = self.select_role()
+
+        hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())  # Хэширование с добавлением соли
+
+        self.db = QSqlDatabase.addDatabase('QSQLITE')
+        self.db.setDatabaseName('form.db')
+        self.db.open()
+
+        if not login or not password:
+            QMessageBox.warning(self, 'заполните все поля', 'не все поля заполнены, заполните их для регистрации')
+            return
+        
+        query = QSqlQuery()
+        query.prepare("SELECT COUNT(*) FROM users WHERE login = ?;")
+        query.addBindValue(login)
+        query.exec_()
+
+        if query.next() and query.value(0) > 0:
+            QMessageBox.warning(self, "Ошибка", "Пользователь с таким именем или email уже существует.")
+            return
+        
+        # Вставка нового пользователя в таблицу
+        query.prepare("INSERT INTO users (login, pass, hash_pass, Role) VALUES (?, ?, ?, ?);")
+        query.addBindValue(login)
+        query.addBindValue(password) # В реальной системе нужно использовать хэширование пароля!
+        query.addBindValue(hashed_password.decode('utf-8'))
+        query.addBindValue(role)
+
+        if query.exec_():
+            QMessageBox.information(self, "Успех", "Регистрация прошла успешно!")
+            Register_window.hide(self)
+            self.login_win = Login_window()
+            self.login_win.show()
+        else:
+            QMessageBox.critical(self, "Ошибка", "Не удалось зарегистрировать пользователя.")
+
+    def add_user_combobox(self):
+        role_user = "Клиент"
+        role_admin = "Админ"
 
 
 class Login_window(QMainWindow):
     def __init__(self):
         super().__init__()
-        uic.loadUi(r"design\login.ui", self)
+        uic.loadUi(r"login.ui", self)
         self.setWindowTitle("DataBase")
 
         # кнопка авторизации
@@ -70,7 +130,7 @@ class Login_window(QMainWindow):
 class Register_window(QMainWindow):
     def __init__(self):
         super().__init__()
-        uic.loadUi(r"design\register.ui", self)
+        uic.loadUi(r"register.ui", self)
         self.setWindowTitle("DataBase")
 
         # кнопка регистрации
@@ -133,10 +193,10 @@ class Register_window(QMainWindow):
         self.login_win.show()
 
 
-class Object_data(QMainWindow):
+class Admin_window(QMainWindow):
     def __init__(self):
         super().__init__()
-        uic.loadUi(r"design\form.ui", self)
+        uic.loadUi(r"form.ui", self)
         self.setWindowTitle("DataBase")
 
         # Кнопки взаимодействия с БД
@@ -146,8 +206,8 @@ class Object_data(QMainWindow):
         self.lastDB.clicked.connect(self.last_data)
 
         # Кнопки авторизации
-        self.registerDB.clicked.connect(self.reg_data)
-        self.loginDB.clicked.connect(self.login_data)
+        self.add_user.clicked.connect(self.add_user_btn)
+        self.delete_user.clicked.connect(self.delete_user_btn)
 
         self.model = None
         self.index = 0
@@ -236,20 +296,65 @@ class Object_data(QMainWindow):
         except (IndexError, TypeError):
             QMessageBox.critical(self, "Ошибка", "Соединение не установлено")
 
-    def reg_data(self):
-        self.reg_window = Register_window()
-        self.reg_window.show()
+    def add_user_btn(self):
+        self.new_user = Add_user()
+        self.new_user.show()
 
-    def login_data(self):
-        self.log_window = Login_window()
-        self.log_window.show()
+    def delete_user_btn(self):
+        row_count = self.model.rowCount()
+        if row_count > 0:
+            self.model.removeRow(row_count - 1)
+            if self.model.submitAll():
+                print("пользователь удален!")
+                QMessageBox.information(self, "Успех", "Пользователь удален")
+            else:
+                print('Ошибка')
+                QMessageBox.warning(self, 'Ошибка', "Не удалось удалить пользователя")
+                self.model.revertAll()
         
         
-class Admin_window(QMainWindow):
+class Object_data(QMainWindow):
     def __init__(self):
         super().__init__()
-        uic.loadUi(r"design\admin.ui", self)
+        uic.loadUi(r"admin.ui", self)
         self.setWindowTitle("Admin_menu")
+
+        self.confirm.clicked.connect(self.submit_order)
+
+    def submit_order(self):
+        clientID = self.line_clientId
+        date_order = self.line_date
+        fault = self.line_fault
+        description = self.line_desc
+
+        # Открытие базы данных
+        self.db = QSqlDatabase.addDatabase('QSQLITE')
+        self.db.setDatabaseName('form.db')
+        self.db.open()
+            # Условие: если база данных не откроется, вывести ошибку
+        if not self.db.open():
+            QMessageBox.critical(self, "Ошибка подключения!", "Неудалось подключиться к базе данных.")
+            sys.exit(1)
+        
+        if not clientID or not date_order or not fault or not description:
+            QMessageBox.warning(self, 'заполните все поля', 'не все поля заполнены, заполните их для регистрации')
+            return
+        
+        # Вставка нового пользователя в таблицу
+        query = QSqlQuery()
+        query.prepare("INSERT INTO Заявки (Дата заявки, КлиентID, тип неисправности, описание проблемы) VALUES (?, ?, ?, ?);")
+        query.addBindValue(date_order)
+        query.addBindValue(clientID)
+        query.addBindValue(fault)
+        query.addBindValue(description)
+        try:
+            query.exec_()
+            QMessageBox.information(self, "Успех", "Заявка отправлена!")
+            Register_window.hide(self)
+            self.login_win = Login_window()
+            self.login_win.show()
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", "Не удалось не удалось отправить заявку", e)
 
 
 
